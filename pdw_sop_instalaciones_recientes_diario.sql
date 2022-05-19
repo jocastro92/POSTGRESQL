@@ -1,4 +1,4 @@
-create procedure pdw_sop_instalaciones_recientes_diario(p_fecha date DEFAULT (CURRENT_DATE - '1 day'::interval))
+create or replace procedure pdw_sop_instalaciones_recientes_diario(p_fecha date DEFAULT (CURRENT_DATE - '1 day'::interval))
     language plpgsql
 as
 $$
@@ -7,6 +7,8 @@ declare
     v_fecha_dia_anterior date;
     v_fecha_semana       date;
 begin
+
+    --hola mundo soy un github
 
     v_fecha_dia_anterior := p_fecha;
     v_fecha_semana := p_fecha - '6 days'::interval;
