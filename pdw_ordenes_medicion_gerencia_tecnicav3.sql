@@ -6,7 +6,7 @@ DECLARE
     v_dia_bandera        int;
     v_fecha_mes_anterior date;
 BEGIN
-    --hola mundo soy un github
+
     --================================================================================================
     --analisis month over month
     if (p_fecha != public.end_of_month(p_fecha))
@@ -106,27 +106,18 @@ BEGIN
                    ELSE o."Estado" END    estado,
                o.medio,
                case
-                   when o."Actividad" in ('CEQUI',
-                                          'CMOFFLINE',
+                   when o."Actividad" in ('CEQUICORP',
                                           'CMOFFLINECORP',
-                                          'INSFIBRA',
                                           'INSFIBRACORP',
-                                          'INSHFC',
                                           'INSHFCCORP',
-                                          'SOP',
                                           'SOPCORP',
-                                          'SOPFIBRA',
                                           'SOPFIBRACORP',
                                           'SOPRECONCORP',
-                                          'SOPRECONHFC',
-                                          'STB',
-                                          'TRASLADOEXTFIBRA',
-                                          'TRASLADOEXTHFC',
-                                          'TRASLADOINTERNOFIBRA',
-                                          'TRASLADOINTERNOHFC',
+                                          'STBCORP',
+                                          'TRASLADOEXTFIBRACORP',
+                                          'TRASLADOEXTHFCCORP',
                                           'TRASLADOINTFIBRACORP',
                                           'TRASLADOINTHFCCORP',
-                                          'TVADICIONAL',
                                           'TVADICIONALCORP',
                                           'PEXTERNO') then true
                    else false end         es_medicion
@@ -189,9 +180,8 @@ BEGIN
     call pdw_cambio_equipo_gerencia_tecnica(p_fecha);
     call pdw_fallas_medicion_gerencia_tecnicav3(p_fecha);
 
-    --github finaL
 END;
 $$;
 
-
+alter procedure pdw_ordenes_medicion_gerencia_tecnicav3(date) owner to jcastro;
 
