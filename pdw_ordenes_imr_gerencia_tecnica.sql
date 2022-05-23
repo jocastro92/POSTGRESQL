@@ -1,0 +1,157 @@
+create procedure pdw_ordenes_imr_gerencia_tecnica(p_fecha date DEFAULT (CURRENT_DATE - '1 day'::interval))
+    language plpgsql
+as
+$$
+DECLARE
+    v_dia_bandera        int;
+    v_fecha_mes_anterior date;
+BEGIN
+
+    --================================================================================================
+    --analisis month over month
+    if (p_fecha != public.end_of_month(p_fecha))
+    then
+        select extract(day from p_fecha) into v_dia_bandera;
+    else
+        v_dia_bandera := 31;
+    end if;
+
+    v_fecha_mes_anterior := date(p_fecha - '1month'::interval);
+
+    raise notice '%,%', v_dia_bandera, p_fecha;
+    --================================================================================================
+    --analisis de ordenes para reporte mensual de ordenes IMR
+    drop table if exists tbl_temp_ordenes_mes_actual_w1;
+    create temp table tbl_temp_ordenes_mes_actual_w1 as (
+        SELECT o.rango_dias_a_visita      rango_dias_visita,
+               o."Actividad"              actividad,
+               o."Ciudad"                 ciudad,
+               o."Region"                 region,
+               o.pais,
+               case
+                   when o."Tipo de Cliente" in ('Residencial', 'PEQUE', 'Vip') then 'Residencial'
+                   when o."Tipo de Cliente" in ('Corporativo', 'PYME') then 'Corporativo'
+                   else 'No Definido' end udn,
+               o."Estado"                 estado,
+               o.medio
+        FROM public.tbl_diario_lista_ordenes_v2 o
+        WHERE extract(day from o."Fecha de Creacion"::DATE) <= v_dia_bandera
+          AND to_char(o."Fecha de Creacion", 'yyyymm') = to_char(p_fecha, 'yyyymm')
+          and o.actividad_imr = true);
+
+    drop table if exists tbl_temp_ordenes_mes_actual_w2;
+    create temp table tbl_temp_ordenes_mes_actual_w2 as (
+        SELECT a.rango_dias_visita,
+               a.actividad,
+               a.ciudad,
+               a.region,
+               a.pais,
+               a.udn,
+               a.estado,
+               a.medio,
+               count(*) contador
+        FROM tbl_temp_ordenes_mes_actual_w1 a
+        group by a.rango_dias_visita, a.actividad, a.ciudad, a.region, a.pais, a.udn, a.estado, a.medio);
+
+    drop table if exists tbl_temp_ordenes_mes_anterior_w1;
+    create temp table if not exists tbl_temp_ordenes_mes_anterior_w1 as (
+        SELECT CASE
+                   WHEN CASE
+                            WHEN extract(day from o."Fecha Liquidacion"::DATE) > v_dia_bandera THEN 'PENDIENTE'
+                            ELSE o."Estado" END = 'CERRADA' AND o.rango_dias_a_visita = '1. Menos de 1 Día'
+                       THEN o.rango_dias_a_visita
+                   WHEN CASE
+                            WHEN extract(day from o."Fecha Liquidacion"::DATE) > v_dia_bandera THEN 'PENDIENTE'
+                            ELSE o."Estado" END = 'CERRADA' AND o.rango_dias_a_visita = '2. De 1 a 3 Días'
+                       THEN o.rango_dias_a_visita
+                   WHEN CASE
+                            WHEN extract(day from o."Fecha Liquidacion"::DATE) > v_dia_bandera THEN 'PENDIENTE'
+                            ELSE o."Estado" END = 'CERRADA' AND o.rango_dias_a_visita = '3. De 3 a 6 Días'
+                       THEN o.rango_dias_a_visita
+                   WHEN CASE
+                            WHEN extract(day from o."Fecha Liquidacion"::DATE) > v_dia_bandera THEN 'PENDIENTE'
+                            ELSE o."Estado" END = 'CERRADA' AND o.rango_dias_a_visita = '4. Más de 6 Días'
+                       THEN o.rango_dias_a_visita
+                   WHEN CASE
+                            WHEN extract(day from o."Fecha Liquidacion"::DATE) > v_dia_bandera THEN 'PENDIENTE'
+                            ELSE o."Estado" END = 'ANULADA' then '0. Anulada'
+                   WHEN CASE
+                            WHEN extract(day from o."Fecha Liquidacion"::DATE) > v_dia_bandera THEN 'PENDIENTE'
+                            ELSE o."Estado" END = 'PENDIENTE' then 'PENDIENTE'
+                   else '5. Sin Entrada'
+                   end AS                 rango_dias_visita_mes_anterior,
+               o."Actividad"              actividad,
+               o."Ciudad"                 ciudad,
+               o."Region"                 region,
+               o.pais,
+               case
+                   when o."Tipo de Cliente" in ('Residencial', 'PEQUE', 'Vip') then 'Residencial'
+                   when o."Tipo de Cliente" in ('Corporativo', 'PYME') then 'Corporativo'
+                   else 'No Definido' end udn,
+               CASE
+                   WHEN extract(day from o."Fecha Liquidacion"::DATE) > v_dia_bandera THEN 'PENDIENTE'
+                   ELSE o."Estado" END    estado,
+               o.medio
+        FROM public.tbl_diario_lista_ordenes_v2 o
+        WHERE extract(day from o."Fecha de Creacion"::DATE) <= v_dia_bandera
+          AND to_char(o."Fecha de Creacion", 'yyyymm') = to_char(v_fecha_mes_anterior, 'yyyymm')
+          and o.actividad_imr = true);
+
+    drop table if exists tbl_temp_ordenes_mes_anterior_w2;
+    create temp table if not exists tbl_temp_ordenes_mes_anterior_w2 as (
+        select a.rango_dias_visita_mes_anterior,
+               a.actividad,
+               a.ciudad,
+               a.region,
+               a.pais,
+               a.udn,
+               a.estado,
+               a.medio,
+               count(*) contador
+        from tbl_temp_ordenes_mes_anterior_w1 a
+        group by a.rango_dias_visita_mes_anterior, a.actividad, a.ciudad, a.region, a.pais, a.udn, a.estado, a.medio);
+
+    TRUNCATE TABLE tbl_ordenes_gerencia_tecnica_imr;
+    INSERT INTO tbl_ordenes_gerencia_tecnica_imr
+    (rango_dias_visita, actividad, ciudad, region, pais, udn, estado, mes_actual, mes_anterior,
+     fecha_mes_actual, fecha_mes_anterior, medio)
+    SELECT coalesce(a.rango_dias_visita, b.rango_dias_visita_mes_anterior) rango_dias_visita,
+           coalesce(a.actividad, b.actividad)                              actividad,
+           coalesce(a.ciudad, b.ciudad)                                    ciudad,
+           coalesce(a.region, b.region)                                    region,
+           coalesce(a.pais, b.pais)                                        pais,
+           coalesce(a.udn, b.udn)                                          udn,
+           coalesce(a.estado, b.estado)                                    estado,
+           coalesce(sum(a.contador), 0)                                    mes_actual,
+           coalesce(sum(b.contador), 0)                                    mes_anterior,
+           p_fecha,
+           v_fecha_mes_anterior,
+           coalesce(a.medio, b.medio)                                      medio
+    FROM tbl_temp_ordenes_mes_actual_w2 a
+             FULL JOIN tbl_temp_ordenes_mes_anterior_w2 b
+                       ON a.rango_dias_visita = b.rango_dias_visita_mes_anterior AND a.actividad = b.actividad AND
+                          a.pais = b.pais AND
+                          a.region = b.region AND a.ciudad = b.ciudad AND
+                          a.udn = b.udn AND a.estado = b.estado and
+                          a.medio = b.medio
+    GROUP BY coalesce(a.rango_dias_visita, b.rango_dias_visita_mes_anterior), coalesce(a.actividad, b.actividad),
+             coalesce(a.ciudad, b.ciudad), coalesce(a.region, b.region), coalesce(a.pais, b.pais),
+             coalesce(a.udn, b.udn), coalesce(a.estado, b.estado),
+             p_fecha, v_fecha_mes_anterior, coalesce(a.medio, b.medio)
+    ORDER BY 5, 4, 3, 2;
+
+    update tbl_ordenes_gerencia_tecnica_imr
+    set zona = (case
+                    when region in ('NORTE', 'LITORAL', 'OCCIDENTE') then 'NOR-OCCIDENTE'
+                    when region in ('CENTRO', 'SUR', 'ORIENTE', 'NORORIENTE') then 'CENTRO-SUR'
+                    else region end)
+    where zona is null;
+
+    --fin del analisis
+    --==================================================================================================================
+
+END;
+$$;
+
+alter procedure pdw_ordenes_imr_gerencia_tecnica(date) owner to jcastro;
+
